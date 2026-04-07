@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <!-- Crucial for Android: Makes it act like a native app -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#020617">
+  <title>The Alphabet Game</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body class="bg-slate-950 text-slate-200 font-sans pb-24 min-h-screen selection:bg-blue-500/30">
+
+  <!-- Loading Screen -->
+  <div id="loading" class="min-h-screen flex items-center justify-center text-blue-400 font-bold">
+    <div class="animate-pulse flex flex-col items-center gap-4">
+      <i data-lucide="target" class="w-12 h-12 animate-spin"></i>
+      <p>Dropping in...</p>
+    </div>
+  </div>
+
+  <!-- Main App -->
+  <div id="app" class="hidden max-w-2xl mx-auto space-y-6 p-4 md:p-8">
+    <header class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden">
+      <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 to-purple-600"></div>
+      <div class="flex justify-between items-start mb-4">
+        <div>
+          <h1 class="text-xl md:text-2xl font-black text-white tracking-tight uppercase italic flex items-center gap-3">
+            <i data-lucide="target" class="text-blue-500 shrink-0"></i>
+            The Alphabet Game
+          </h1>
+          <p id="subtitle" class="text-blue-400 text-sm mt-1 font-bold"></p>
+        </div>
+        <i id="trophy-icon" data-lucide="trophy" class="hidden w-10 h-10 text-yellow-500 animate-bounce shrink-0"></i>
+      </div>
+
+      <div class="space-y-2 mt-6">
+        <div class="flex justify-between text-sm font-bold text-slate-300">
+          <span id="progress-text"></span>
+          <span id="progress-percent" class="text-blue-400"></span>
+        </div>
+        <div class="h-3 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
+          <div id="progress-bar" class="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-700 ease-out" style="width: 0%"></div>
+        </div>
+      </div>
+    </header>
+
+    <main id="locations-list" class="space-y-3"></main>
+
+    <div class="flex justify-center pt-8">
+      <button id="reset-btn" class="flex items-center gap-2 text-slate-500 hover:text-red-400 font-semibold text-sm transition-colors p-2">
+        <i data-lucide="rotate-ccw" class="w-4 h-4"></i> Reset Progress
+      </button>
+    </div>
+  </div>
+
+  <!-- Reset Confirmation Modal -->
+  <div id="reset-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+    <div class="bg-slate-900 border border-slate-700 p-6 rounded-2xl max-w-sm w-full shadow-2xl">
+      <h3 class="text-xl font-black text-white mb-2 uppercase italic tracking-tight">Wipe Progress?</h3>
+      <p class="text-slate-400 mb-8 font-medium">This will uncheck all locations. You cannot undo this action once wiped.</p>
+      <div class="flex gap-3">
+        <button id="cancel-reset" class="flex-1 px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold transition-colors">Cancel</button>
+        <button id="confirm-reset" class="flex-1 px-4 py-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold transition-colors shadow-[0_0_15px_rgba(220,38,38,0.4)]">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Application Logic -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // Your exact Firebase setup
+    const firebaseConfig = {
+      apiKey: "AIzaSyDqltv-8waWZka75QOd85WplilGmBvv2hI",
+      authDomain: "playground-ba738.firebaseapp.com",
+      projectId: "playground-ba738",
+      storageBucket: "playground-ba738.firebasestorage.app",
+      messagingSenderId: "738276488734",
+      appId: "1:738276488734:web:c0a7df38331e0dcf55a00f",
+      measurementId: "G-466KQHL6ED"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const STATIC_APP_ID = 'fortnite-alphabet-save-v1';
+
+    const LOCATIONS = [
+      "BATTLEWOOD BOULEVARD", "DARK DOMINION", "FORE FIELDS", "FRIGID FORTRESS",
+      "HUMBLE HILLS", "LATTE LANDING", "NEW SANCTUARY", "PAINTED PALMS",
+      "RIPPED TIDES", "SANDY STRIP", "SQUIBBLY SHORES", "SUS STUDIOS",
+      "TIPTOP TERRACE", "WONKEELAND"
+    ];
+
+    let user = null;
+    let completed = [];
+
+    // Reset Modal Logic
+    const modal = document.getElementById('reset-modal');
+    document.getElementById('reset-btn').onclick = () => modal.classList.remove('hidden');
+    document.getElementById('cancel-reset').onclick = () => modal.classList.add('hidden');
+    document.getElementById('confirm-reset').onclick = async () => {
+      modal.classList.add('hidden');
+      if (!user) return;
+      await setDoc(doc(db, 'artifacts', STATIC_APP_ID, 'users', user.uid, 'fortniteTracker', 'progress'), { completed: [] }, { merge: true });
+    };
+
+    // Render UI
+    function render() {
+      const nextLocation = LOCATIONS.find(loc => !completed.includes(loc));
+      const pct = Math.round((completed.length / LOCATIONS.length) * 100);
+
+      document.getElementById('subtitle').innerText = nextLocation ? `Dropping at ${nextLocation}` : "Challenge Complete!";
+      document.getElementById('progress-text').innerText = `${completed.length} / ${LOCATIONS.length} Won`;
+      document.getElementById('progress-percent').innerText = `${pct}%`;
+      document.getElementById('progress-bar').style.width = `${pct}%`;
+
+      const trophy = document.getElementById('trophy-icon');
+      if (completed.length === LOCATIONS.length) { trophy.classList.remove('hidden'); } 
+      else { trophy.classList.add('hidden'); }
+
+      const listEl = document.getElementById('locations-list');
+      listEl.innerHTML = '';
+      
+      LOCATIONS.forEach(loc => {
+        const isCompleted = completed.includes(loc);
+        const isNext = loc === nextLocation;
+
+        const btn = document.createElement('button');
+        btn.className = `w-full text-left p-4 rounded-xl flex items-center justify-between border transition-all duration-300 group ${isCompleted ? 'bg-slate-900/50 border-slate-800 opacity-60' : isNext ? 'bg-blue-900/40 border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.2)] transform hover:scale-[1.01]' : 'bg-slate-900 border-slate-700 hover:border-slate-500'}`;
+        
+        btn.onclick = async () => {
+          if (!user) return;
+          const newCompleted = completed.includes(loc) ? completed.filter(l => l !== loc) : [...completed, loc];
+          completed = newCompleted; // Optimistic update
+          render();
+          await setDoc(doc(db, 'artifacts', STATIC_APP_ID, 'users', user.uid, 'fortniteTracker', 'progress'), { completed: newCompleted }, { merge: true });
+        };
+
+        btn.innerHTML = `
+          <div class="flex items-center gap-4 flex-1">
+            <div class="shrink-0 transition-colors duration-300 ${isCompleted ? 'text-green-500' : isNext ? 'text-blue-400' : 'text-slate-500'}">
+              <i data-lucide="${isCompleted ? 'check-circle-2' : isNext ? 'map-pin' : 'circle'}" class="w-6 h-6 ${isNext ? 'animate-bounce' : ''}"></i>
+            </div>
+            <span class="font-bold tracking-wide text-lg transition-all duration-300 ${isCompleted ? 'text-slate-500 line-through' : isNext ? 'text-blue-100' : 'text-slate-300'}">
+              ${loc}
+            </span>
+          </div>
+          ${isNext ? `
+            <span class="flex items-center gap-1.5 text-xs font-black bg-yellow-500/20 border border-yellow-500/50 text-yellow-400 px-3 py-1.5 rounded-full uppercase tracking-wider animate-pulse ml-2 shadow-[0_0_15px_rgba(234,179,8,0.2)] whitespace-nowrap">
+              <i data-lucide="crown" class="w-4 h-4"></i>
+              <span class="hidden sm:inline">Victory Royale</span>
+            </span>
+          ` : ''}
+        `;
+        listEl.appendChild(btn);
+      });
+      lucide.createIcons(); // Draw the icons
+    }
+
+    // Connect to Firebase
+    signInAnonymously(auth).catch(e => console.error("Auth Error", e));
+
+    onAuthStateChanged(auth, (authUser) => {
+      if (authUser) {
+        user = authUser;
+        const docRef = doc(db, 'artifacts', STATIC_APP_ID, 'users', user.uid, 'fortniteTracker', 'progress');
+        onSnapshot(docRef, (snap) => {
+          completed = snap.exists() ? (snap.data().completed || []) : [];
+          document.getElementById('loading').classList.add('hidden');
+          document.getElementById('app').classList.remove('hidden');
+          render();
+        });
+      }
+    });
+  </script>
+</body>
+</html>
