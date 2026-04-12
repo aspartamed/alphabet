@@ -8,21 +8,17 @@
   <title>The Alphabet Game</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Confetti Engine -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
 </head>
 <body class="bg-slate-950 text-slate-200 font-sans pb-24 min-h-screen selection:bg-blue-500/30">
 
-  <!-- Loading Screen -->
-  <div id="loading" class="min-h-screen flex items-center justify-center text-blue-400 font-bold">
-    <div class="animate-pulse flex flex-col items-center gap-4">
-      <i data-lucide="target" class="w-12 h-12 animate-spin"></i>
-      <p>Dropping in...</p>
-    </div>
-  </div>
-
   <!-- Main App -->
-  <div id="app" class="hidden max-w-2xl mx-auto space-y-6 p-4 md:p-8">
+  <div id="app" class="max-w-2xl mx-auto space-y-6 p-4 md:p-8">
+    
     <header class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden">
       <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 to-purple-600"></div>
+      
       <div class="flex justify-between items-start mb-4">
         <div>
           <h1 class="text-xl md:text-2xl font-black text-white tracking-tight uppercase italic flex items-center gap-3">
@@ -32,6 +28,16 @@
           <p id="subtitle" class="text-blue-400 text-sm mt-1 font-bold"></p>
         </div>
         <i id="trophy-icon" data-lucide="trophy" class="hidden w-10 h-10 text-yellow-500 animate-bounce shrink-0"></i>
+      </div>
+
+      <div class="mt-2 mb-4 relative">
+        <select id="map-select" class="w-full bg-slate-950/50 border border-slate-700 text-slate-300 text-sm rounded-xl px-4 py-3 appearance-none outline-none focus:border-blue-500 transition-colors font-bold cursor-pointer shadow-inner">
+          <option value="Map 1">Map 1 (Snow/Grass)</option>
+          <option value="Map 2">Map 2 (Desert)</option>
+          <option value="Map 3">Map 3 (Swamp/Forest)</option>
+          <option value="Map 4">Map 4 (Classic)</option>
+        </select>
+        <i data-lucide="chevron-down" class="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none"></i>
       </div>
 
       <div class="space-y-2 mt-6">
@@ -66,81 +72,208 @@
     </div>
   </div>
 
-  <!-- Application Logic -->
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-    import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { getFirestore, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+  <!-- Victory Royale Overlay -->
+  <div id="victory-overlay" class="fixed inset-0 pointer-events-none z-[100] flex items-center justify-center opacity-0 transition-opacity duration-300 hidden bg-slate-950/60 backdrop-blur-sm">
+    <div id="victory-banner" class="transform scale-0 transition-transform duration-700 ease-[cubic-bezier(0.175,0.885,0.32,1.275)] flex flex-col items-center text-center">
+      <div class="text-5xl md:text-7xl font-black text-white uppercase italic tracking-tighter drop-shadow-[0_5px_5px_rgba(0,0,0,1)]">
+        #1 Victory Royale
+      </div>
+      <div class="text-yellow-400 text-lg md:text-2xl mt-4 font-black uppercase tracking-[0.4em] drop-shadow-[0_2px_2px_rgba(0,0,0,1)]">
+        Map Completed
+      </div>
+    </div>
+  </div>
 
-    // Your exact Firebase setup
-    const firebaseConfig = {
-      apiKey: "AIzaSyDqltv-8waWZka75QOd85WplilGmBvv2hI",
-      authDomain: "playground-ba738.firebaseapp.com",
-      projectId: "playground-ba738",
-      storageBucket: "playground-ba738.firebasestorage.app",
-      messagingSenderId: "738276488734",
-      appId: "1:738276488734:web:c0a7df38331e0dcf55a00f",
-      measurementId: "G-466KQHL6ED"
+  <!-- Application Logic -->
+  <script>
+    const MAPS = {
+      "Map 1": [
+        "BATTLEWOOD BOULEVARD", "DARK DOMINION", "FORE FIELDS", "FRIGID FORTRESS",
+        "HUMBLE HILLS", "LATTE LANDING", "NEW SANCTUARY", "PAINTED PALMS",
+        "RIPPED TIDES", "SANDY STRIP", "SQUIBBLY SHORES", "SUS STUDIOS",
+        "TIPTOP TERRACE", "WONKEELAND"
+      ],
+      "Map 2": [
+        "ADOBE ABODES", "FOSSIL FIELDS", "GUACO TOWN", "LIZARD LINKS",
+        "PARADISE PALMS", "SHADY SPRINGS", "SNOBBY SANDS", "SUNBURNT SHAFTS",
+        "TWISTED TRAILERS"
+      ],
+      "Map 3": [
+        "BOOMIN BASE", "DIRTY DOCKS", "FORT CRUMPET", "LOCKDOWN LIGHTHOUSE",
+        "LOGJAM LOGGING", "SLURPY SWAMP", "STEAMY STACKS", "STILT TOWN"
+      ],
+      "Map 4": [
+        "DUSTY DOCKS", "LAZY LAPS", "LIL'LOOT LAKE", "LONE LODGE",
+        "PLEASANT PARK", "RETAIL ROW", "SANDY SHEETS", "SNOBBY SHOALS",
+        "TILTED TOWERS"
+      ]
     };
 
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
-    const STATIC_APP_ID = 'fortnite-alphabet-save-v1';
+    const STORAGE_KEY = 'fortnite_alphabet_progress';
+    const LOSSES_KEY = 'fortnite_alphabet_losses';
+    let completed = { "Map 1": [], "Map 2": [], "Map 3": [], "Map 4": [] };
+    let losses = { "Map 1": {}, "Map 2": {}, "Map 3": {}, "Map 4": {} };
+    let currentMap = localStorage.getItem('fortnite_current_map') || "Map 1";
 
-    const LOCATIONS = [
-      "BATTLEWOOD BOULEVARD", "DARK DOMINION", "FORE FIELDS", "FRIGID FORTRESS",
-      "HUMBLE HILLS", "LATTE LANDING", "NEW SANCTUARY", "PAINTED PALMS",
-      "RIPPED TIDES", "SANDY STRIP", "SQUIBBLY SHORES", "SUS STUDIOS",
-      "TIPTOP TERRACE", "WONKEELAND"
-    ];
+    // Load from Local Storage (with backward compatibility for your existing saves)
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          completed["Map 1"] = parsed;
+        } else {
+          completed = { ...completed, ...parsed };
+        }
+      }
 
-    let user = null;
-    let completed = [];
+      const savedLosses = localStorage.getItem(LOSSES_KEY);
+      if (savedLosses) {
+        const parsedLosses = JSON.parse(savedLosses);
+        losses = { ...losses, ...parsedLosses };
+      }
+    } catch (e) {
+      console.error("Could not load from local storage", e);
+    }
+
+    // Save to Local Storage
+    function saveProgress() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(completed));
+      } catch (e) {
+        console.error("Could not save to local storage", e);
+      }
+    }
+
+    function saveLosses() {
+      try {
+        localStorage.setItem(LOSSES_KEY, JSON.stringify(losses));
+      } catch (e) {
+        console.error("Could not save losses to local storage", e);
+      }
+    }
+
+    // Map Selection Logic
+    document.getElementById('map-select').value = currentMap;
+    document.getElementById('map-select').addEventListener('change', (e) => {
+      currentMap = e.target.value;
+      localStorage.setItem('fortnite_current_map', currentMap);
+      render();
+    });
 
     // Reset Modal Logic
     const modal = document.getElementById('reset-modal');
     document.getElementById('reset-btn').onclick = () => modal.classList.remove('hidden');
     document.getElementById('cancel-reset').onclick = () => modal.classList.add('hidden');
-    document.getElementById('confirm-reset').onclick = async () => {
+    document.getElementById('confirm-reset').onclick = () => {
       modal.classList.add('hidden');
-      if (!user) return;
-      await setDoc(doc(db, 'artifacts', STATIC_APP_ID, 'users', user.uid, 'fortniteTracker', 'progress'), { completed: [] }, { merge: true });
+      completed[currentMap] = [];
+      losses[currentMap] = {};
+      saveProgress();
+      saveLosses();
+      render();
     };
+
+    // Victory Royale Animation
+    function triggerVictory() {
+      // 1. Fire Confetti
+      const duration = 3000;
+      const end = Date.now() + duration;
+
+      (function frame() {
+        confetti({
+          particleCount: 5,
+          angle: 60,
+          spread: 55,
+          origin: { x: 0 },
+          colors: ['#3b82f6', '#eab308', '#ffffff'] // Fortnite Blue, Yellow, White
+        });
+        confetti({
+          particleCount: 5,
+          angle: 120,
+          spread: 55,
+          origin: { x: 1 },
+          colors: ['#3b82f6', '#eab308', '#ffffff']
+        });
+
+        if (Date.now() < end) {
+          requestAnimationFrame(frame);
+        }
+      }());
+
+      // 2. Show Expanding Banner
+      const overlay = document.getElementById('victory-overlay');
+      const banner = document.getElementById('victory-banner');
+      
+      overlay.classList.remove('hidden');
+      
+      // Need a tiny delay for the browser to register 'display: block' before animating
+      requestAnimationFrame(() => {
+        overlay.classList.remove('opacity-0');
+        banner.classList.remove('scale-0');
+        banner.classList.add('scale-100');
+      });
+
+      // 3. Hide gracefully after 4 seconds
+      setTimeout(() => {
+        overlay.classList.add('opacity-0');
+        banner.classList.remove('scale-100');
+        banner.classList.add('scale-0');
+        setTimeout(() => {
+          overlay.classList.add('hidden');
+        }, 500); // Wait for fade out transition
+      }, 4000);
+    }
 
     // Render UI
     function render() {
-      const nextLocation = LOCATIONS.find(loc => !completed.includes(loc));
-      const pct = Math.round((completed.length / LOCATIONS.length) * 100);
+      const locs = MAPS[currentMap];
+      const nextLocation = locs.find(loc => !completed[currentMap].includes(loc));
+      const pct = Math.round((completed[currentMap].length / locs.length) * 100);
 
       document.getElementById('subtitle').innerText = nextLocation ? `Dropping at ${nextLocation}` : "Challenge Complete!";
-      document.getElementById('progress-text').innerText = `${completed.length} / ${LOCATIONS.length} Won`;
+      document.getElementById('progress-text').innerText = `${completed[currentMap].length} / ${locs.length} Won`;
       document.getElementById('progress-percent').innerText = `${pct}%`;
       document.getElementById('progress-bar').style.width = `${pct}%`;
 
       const trophy = document.getElementById('trophy-icon');
-      if (completed.length === LOCATIONS.length) { trophy.classList.remove('hidden'); } 
+      if (completed[currentMap].length === locs.length) { trophy.classList.remove('hidden'); } 
       else { trophy.classList.add('hidden'); }
 
       const listEl = document.getElementById('locations-list');
       listEl.innerHTML = '';
       
-      LOCATIONS.forEach(loc => {
-        const isCompleted = completed.includes(loc);
+      locs.forEach(loc => {
+        const isCompleted = completed[currentMap].includes(loc);
         const isNext = loc === nextLocation;
+        const lossCount = losses[currentMap][loc] || 0;
 
-        const btn = document.createElement('button');
-        btn.className = `w-full text-left p-4 rounded-xl flex items-center justify-between border transition-all duration-300 group ${isCompleted ? 'bg-slate-900/50 border-slate-800 opacity-60' : isNext ? 'bg-blue-900/40 border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.2)] transform hover:scale-[1.01]' : 'bg-slate-900 border-slate-700 hover:border-slate-500'}`;
+        const wrapper = document.createElement('div');
+        wrapper.className = "flex gap-2 w-full";
+
+        const winBtn = document.createElement('button');
+        winBtn.className = `flex-1 text-left p-4 rounded-xl flex items-center justify-between border transition-all duration-300 group ${isCompleted ? 'bg-slate-900/50 border-slate-800 opacity-60' : isNext ? 'bg-blue-900/40 border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.2)] transform hover:scale-[1.01]' : 'bg-slate-900 border-slate-700 hover:border-slate-500'}`;
         
-        btn.onclick = async () => {
-          if (!user) return;
-          const newCompleted = completed.includes(loc) ? completed.filter(l => l !== loc) : [...completed, loc];
-          completed = newCompleted; // Optimistic update
+        winBtn.onclick = () => {
+          // Check map status before we add the new click
+          const wasCompleted = completed[currentMap].length === locs.length;
+
+          if (completed[currentMap].includes(loc)) {
+            completed[currentMap] = completed[currentMap].filter(l => l !== loc);
+          } else {
+            completed[currentMap].push(loc);
+          }
+          saveProgress();
+
+          // Check if we just won the whole map on this specific click
+          if (!wasCompleted && completed[currentMap].length === locs.length) {
+            triggerVictory();
+          }
+
           render();
-          await setDoc(doc(db, 'artifacts', STATIC_APP_ID, 'users', user.uid, 'fortniteTracker', 'progress'), { completed: newCompleted }, { merge: true });
         };
 
-        btn.innerHTML = `
+        winBtn.innerHTML = `
           <div class="flex items-center gap-4 flex-1">
             <div class="shrink-0 transition-colors duration-300 ${isCompleted ? 'text-green-500' : isNext ? 'text-blue-400' : 'text-slate-500'}">
               <i data-lucide="${isCompleted ? 'check-circle-2' : isNext ? 'map-pin' : 'circle'}" class="w-6 h-6 ${isNext ? 'animate-bounce' : ''}"></i>
@@ -156,26 +289,41 @@
             </span>
           ` : ''}
         `;
-        listEl.appendChild(btn);
+
+        const lossBtn = document.createElement('button');
+        lossBtn.className = `shrink-0 min-w-[4rem] p-2 rounded-xl flex flex-col items-center justify-center border transition-all duration-300 ${lossCount > 0 ? 'bg-red-950/40 border-red-900 text-red-400 hover:bg-red-900/60' : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-red-500 hover:text-red-400 opacity-60 hover:opacity-100'}`;
+        
+        // Click to add a loss
+        lossBtn.onclick = () => {
+          losses[currentMap][loc] = (losses[currentMap][loc] || 0) + 1;
+          saveLosses();
+          render();
+        };
+        
+        // Long-press (mobile) or Right-click (PC) to remove a loss
+        lossBtn.oncontextmenu = (e) => {
+          e.preventDefault();
+          if (losses[currentMap][loc] > 0) {
+            losses[currentMap][loc] -= 1;
+            saveLosses();
+            render();
+          }
+        };
+
+        lossBtn.innerHTML = `
+          <i data-lucide="skull" class="w-5 h-5"></i>
+          ${lossCount > 0 ? `<span class="text-xs font-bold mt-1">${lossCount}</span>` : ''}
+        `;
+
+        wrapper.appendChild(winBtn);
+        wrapper.appendChild(lossBtn);
+        listEl.appendChild(wrapper);
       });
       lucide.createIcons(); // Draw the icons
     }
 
-    // Connect to Firebase
-    signInAnonymously(auth).catch(e => console.error("Auth Error", e));
-
-    onAuthStateChanged(auth, (authUser) => {
-      if (authUser) {
-        user = authUser;
-        const docRef = doc(db, 'artifacts', STATIC_APP_ID, 'users', user.uid, 'fortniteTracker', 'progress');
-        onSnapshot(docRef, (snap) => {
-          completed = snap.exists() ? (snap.data().completed || []) : [];
-          document.getElementById('loading').classList.add('hidden');
-          document.getElementById('app').classList.remove('hidden');
-          render();
-        });
-      }
-    });
+    // Initial load
+    render();
   </script>
 </body>
 </html>
